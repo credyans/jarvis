@@ -414,20 +414,26 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 24.0),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              JarvisButton(
-                                text: 'Add Savings Plan',
-                                onPressed: () => _showAddSavingsPlanSheet(context),
-                              ),
-                              const SizedBox(width: 12.0),
-                              JarvisButton(
-                                text: 'Add Goal',
-                                isOutline: true,
-                                onPressed: () => _showAddGoalSheet(context),
-                              ),
-                            ],
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: JarvisButton(
+                                    text: 'Add Savings Plan',
+                                    onPressed: () => _showAddSavingsPlanSheet(context),
+                                  ),
+                                ),
+                                const SizedBox(width: 16.0),
+                                Expanded(
+                                  child: JarvisButton(
+                                    text: 'Add Goal',
+                                    isOutline: true,
+                                    onPressed: () => _showAddGoalSheet(context),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -603,15 +609,50 @@ class _OperatingLiquidityHeader extends ConsumerWidget {
     final safeToSpend = (income - expense).clamp(0.0, double.infinity);
     final displayBalance = safeToSpend;
 
+    // Calculate dynamic savings rate
+    final double changePercentage = income > 0 ? (safeToSpend / income) * 100 : 0.0;
+    final String percentageText = '${changePercentage > 0 ? '+' : ''}${changePercentage.toStringAsFixed(1)}%';
+    final Color percentageColor = changePercentage > 0 ? AppColors.success : AppColors.textSecondary;
+    final IconData percentageIcon = changePercentage > 0 ? Icons.trending_up_rounded : Icons.trending_flat_rounded;
+    final Color percentageBgColor = changePercentage > 0 ? AppColors.success.withOpacity(0.15) : AppColors.textSecondary.withOpacity(0.1);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Operating Liquidity',
-          style: AppTypography.micro(color: AppColors.textSecondary).copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.0,
-          ),
+        Row(
+          children: [
+            Text(
+              'Operating Liquidity',
+              style: AppTypography.micro(color: AppColors.textSecondary).copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.0,
+              ),
+            ),
+            const SizedBox(width: 4.0),
+            Tooltip(
+              message: "Operating Liquidity is your 'Safe-to-Spend' amount (Income minus Expenses). The percentage indicates your current monthly Net Savings Rate.",
+              triggerMode: TooltipTriggerMode.tap,
+              preferBelow: true,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12.0),
+                border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 10.0,
+                  ),
+                ],
+              ),
+              textStyle: AppTypography.caption(color: AppColors.textPrimary),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+              child: Icon(
+                Icons.info_outline_rounded,
+                size: 14.0,
+                color: AppColors.textSecondary.withOpacity(0.6),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 6.0),
         Row(
@@ -626,23 +667,41 @@ class _OperatingLiquidityHeader extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 12.0),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            Tooltip(
+              message: "Your current Net Savings Rate: $percentageText of monthly income kept after expenses.",
+              triggerMode: TooltipTriggerMode.tap,
+              preferBelow: true,
               decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6.0),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.trending_up_rounded, color: AppColors.success, size: 14.0),
-                  const SizedBox(width: 4.0),
-                  Text(
-                    '+12.4%',
-                    style: AppTypography.micro(color: AppColors.success).copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12.0),
+                border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 10.0,
                   ),
                 ],
+              ),
+              textStyle: AppTypography.caption(color: AppColors.textPrimary),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                decoration: BoxDecoration(
+                  color: percentageBgColor,
+                  borderRadius: BorderRadius.circular(6.0),
+                ),
+                child: Row(
+                  children: [
+                    Icon(percentageIcon, color: percentageColor, size: 14.0),
+                    const SizedBox(width: 4.0),
+                    Text(
+                      percentageText,
+                      style: AppTypography.micro(color: percentageColor).copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

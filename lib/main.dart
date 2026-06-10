@@ -11,23 +11,19 @@ import 'package:jarvis/app.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  if (AppConfig.useFirebase) {
-    // Initialize Firebase Core
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+  // 1. Initialize local databases (Hive)
+  await Hive.initFlutter();
 
-    // Initialize Notification Service
+  // 2. Initialize Cloud Backends
+  if (AppConfig.useFirebase) {
     try {
-      await NotificationService().initialize();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
     } catch (e) {
-      debugPrint('Error initializing notifications: $e');
+      debugPrint('Error initializing Firebase: $e');
     }
   } else {
-    // Initialize Hive local database
-    await Hive.initFlutter();
-
-    // Initialize Supabase
     if (AppConfig.useSupabase && AppConfig.supabaseAnonKey != 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE') {
       try {
         await Supabase.initialize(
@@ -38,6 +34,13 @@ void main() async {
         debugPrint('Error initializing Supabase: $e');
       }
     }
+  }
+
+  // 3. Initialize local and scheduled notification services
+  try {
+    await NotificationService().initialize();
+  } catch (e) {
+    debugPrint('Error initializing notifications: $e');
   }
 
   runApp(

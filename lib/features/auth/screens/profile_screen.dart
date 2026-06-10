@@ -11,6 +11,7 @@ import 'package:jarvis/shared/widgets/jarvis_input.dart';
 import 'package:jarvis/shared/widgets/toast_notification.dart';
 import 'package:jarvis/shared/widgets/gradient_background.dart';
 import 'package:jarvis/core/utils/date_helpers.dart';
+import 'package:jarvis/features/notifications/screens/notification_settings_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -299,6 +300,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 );
                               }).toList(),
                             ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24.0),
+                    // App Configuration Section
+                    Text(
+                      'APP CONFIGURATION',
+                      style: AppTypography.micro(color: AppColors.textSecondary).copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12.0),
+                    JarvisCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.notifications_active_outlined, color: AppColors.textSecondary),
+                            title: Text(
+                              'Notification Preferences',
+                              style: AppTypography.body(color: AppColors.textPrimary),
+                            ),
+                            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16.0, color: AppColors.textTertiary),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const NotificationSettingsScreen()),
+                              );
+                            },
                           ),
                         ],
                       ),

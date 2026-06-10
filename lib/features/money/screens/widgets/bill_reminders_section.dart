@@ -21,34 +21,35 @@ class BillRemindersSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final billsAsync = ref.watch(billReminderProvider);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: SectionHeader(
-            title: 'Bill Reminders',
-            onActionTap: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (context) => const AddBillReminderSheet(),
-              );
-            },
-            actionLabel: '+ Add Bill',
-          ),
-        ),
-        const SizedBox(height: 10.0),
-        billsAsync.when(
-          data: (reminders) {
-            if (reminders.isEmpty) {
-              return EmptyState(
-                emoji: '🧾',
-                title: 'Never miss a bill payment',
-                subtitle: 'Bills tracker helps you monitor recurring utilities and services. Set up reminders to prevent late fees and protect your credit score.',
-                actionLabel: 'Add Bill Reminder',
-                onActionPressed: () {
+    return billsAsync.when(
+      data: (reminders) {
+        if (reminders.isEmpty) {
+          return Center(
+            child: EmptyState(
+              emoji: '🧾',
+              title: 'Never miss a bill payment',
+              subtitle: 'Bills tracker helps you monitor recurring utilities and services. Set up reminders to prevent late fees and protect your credit score.',
+              actionLabel: 'Add Bill Reminder',
+              onActionPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (context) => const AddBillReminderSheet(),
+                );
+              },
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: SectionHeader(
+                title: 'Bill Reminders',
+                onActionTap: () {
                   showModalBottomSheet(
                     context: context,
                     isScrollControlled: true,
@@ -56,17 +57,18 @@ class BillRemindersSection extends ConsumerWidget {
                     builder: (context) => const AddBillReminderSheet(),
                   );
                 },
-              );
-            }
-
-            return Column(
+                actionLabel: '+ Add Bill',
+              ),
+            ),
+            const SizedBox(height: 10.0),
+            Column(
               children: reminders.map((b) => _BillReminderCard(reminder: b)).toList(),
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => const SizedBox.shrink(),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
