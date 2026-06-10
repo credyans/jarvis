@@ -208,6 +208,7 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
     final goalsAsync = ref.watch(goalProvider);
     final debtsAsync = ref.watch(debtProvider);
     final savingsPlansAsync = ref.watch(savingsPlanProvider);
+    final billsAsync = ref.watch(billReminderProvider);
 
     // Calculate Summary Metrics
     final goals = goalsAsync.value ?? [];
@@ -241,6 +242,13 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
     }
 
     final txs = transactionsAsync.value ?? [];
+    final reminders = billsAsync.value ?? [];
+
+    final activeTabEmpty = (_activeTabIndex == 0 && txs.isEmpty) ||
+                           (_activeTabIndex == 1 && goals.isEmpty && savingsPlans.isEmpty) ||
+                           (_activeTabIndex == 2 && reminders.isEmpty) ||
+                           (_activeTabIndex == 3 && debts.isEmpty);
+    final scrollPhysics = activeTabEmpty ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -271,7 +279,7 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
             ref.invalidate(recentTransactionsProvider);
           },
           child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: scrollPhysics,
             slivers: [
               // ALWAYS SHOWN: 1. Operating Liquidity Header
               SliverPadding(
@@ -297,12 +305,14 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
                 if (txs.isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: EmptyState(
-                      emoji: '📊',
-                      title: 'Financial Overview',
-                      subtitle: 'Tracks daily transaction history and cash flow dynamics.',
-                      actionLabel: '+ Add Record',
-                      onActionPressed: () => _showAddTransactionSheet(context),
+                    child: Center(
+                      child: EmptyState(
+                        emoji: '📊',
+                        title: 'Financial Overview',
+                        subtitle: 'Tracks daily transaction history and cash flow dynamics.',
+                        actionLabel: '+ Add Record',
+                        onActionPressed: () => _showAddTransactionSheet(context),
+                      ),
                     ),
                   )
                 else ...[
@@ -390,35 +400,37 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
                 if (goals.isEmpty && savingsPlans.isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text('🐷', style: TextStyle(fontSize: 64.0)),
-                        const SizedBox(height: 16.0),
-                        Text('Savings & Goals', style: AppTypography.h3(color: AppColors.textPrimary)),
-                        const SizedBox(height: 8.0),
-                        Text(
-                          'Grow wealth by creating savings plans or tracking goals.',
-                          style: AppTypography.body(color: AppColors.textSecondary),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24.0),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            JarvisButton(
-                              text: 'Add Savings Plan',
-                              onPressed: () => _showAddSavingsPlanSheet(context),
-                            ),
-                            const SizedBox(width: 12.0),
-                            JarvisButton(
-                              text: 'Add Goal',
-                              isOutline: true,
-                              onPressed: () => _showAddGoalSheet(context),
-                            ),
-                          ],
-                        ),
-                      ],
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('🐷', style: TextStyle(fontSize: 64.0)),
+                          const SizedBox(height: 16.0),
+                          Text('Savings & Goals', style: AppTypography.h3(color: AppColors.textPrimary)),
+                          const SizedBox(height: 8.0),
+                          Text(
+                            'Grow wealth by creating savings plans or tracking goals.',
+                            style: AppTypography.body(color: AppColors.textSecondary),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24.0),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              JarvisButton(
+                                text: 'Add Savings Plan',
+                                onPressed: () => _showAddSavingsPlanSheet(context),
+                              ),
+                              const SizedBox(width: 12.0),
+                              JarvisButton(
+                                text: 'Add Goal',
+                                isOutline: true,
+                                onPressed: () => _showAddGoalSheet(context),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 else ...[
@@ -467,23 +479,46 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
                 ],
               ] else if (_activeTabIndex == 2) ...[
                 // Bills Tab
-                const SliverPadding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  sliver: SliverToBoxAdapter(
-                    child: BillRemindersSection(),
+                if (reminders.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: EmptyState(
+                        emoji: '🧾',
+                        title: 'Never miss a bill payment',
+                        subtitle: 'Bills tracker helps you monitor recurring utilities and services. Set up reminders to prevent late fees and protect your credit score.',
+                        actionLabel: 'Add Bill Reminder',
+                        onActionPressed: () {
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (context) => const AddBillReminderSheet(),
+                          );
+                        },
+                      ),
+                    ),
+                  )
+                else
+                  const SliverPadding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    sliver: SliverToBoxAdapter(
+                      child: BillRemindersSection(),
+                    ),
                   ),
-                ),
               ] else if (_activeTabIndex == 3) ...[
                 // Debts Tab
                 if (debts.isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: EmptyState(
-                      emoji: '🤝',
-                      title: 'Track Peer Agreements',
-                      subtitle: 'Track peer-to-peer agreements and monthly borrowing EMIs.',
-                      actionLabel: '+ Add Agreement',
-                      onActionPressed: () => _showAddDebtSheet(context),
+                    child: Center(
+                      child: EmptyState(
+                        emoji: '🤝',
+                        title: 'Track Peer Agreements',
+                        subtitle: 'Track peer-to-peer agreements and monthly borrowing EMIs.',
+                        actionLabel: '+ Add Agreement',
+                        onActionPressed: () => _showAddDebtSheet(context),
+                      ),
                     ),
                   )
                 else

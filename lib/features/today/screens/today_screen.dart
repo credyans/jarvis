@@ -8,6 +8,7 @@ import 'package:jarvis/data/providers/mood_provider.dart';
 import 'package:jarvis/data/providers/task_provider.dart';
 import 'package:jarvis/data/providers/money_provider.dart';
 import 'package:jarvis/data/providers/habit_provider.dart';
+import 'package:jarvis/data/providers/navigation_provider.dart';
 import 'package:jarvis/features/today/widgets/greeting_header.dart';
 import 'package:jarvis/features/today/widgets/ai_insight_card.dart';
 import 'package:jarvis/features/today/widgets/daily_quote_card.dart';
@@ -16,6 +17,7 @@ import 'package:jarvis/features/today/widgets/jarvis_suggestions_card.dart';
 import 'package:jarvis/features/today/widgets/daily_summary_card.dart';
 import 'package:jarvis/features/today/widgets/mood_checkin_dialog.dart';
 import 'package:jarvis/shared/widgets/jarvis_card.dart';
+import 'package:jarvis/shared/widgets/jarvis_button.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   const TodayScreen({super.key});
@@ -28,40 +30,63 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   bool _hasPromptedMood = false;
 
   Widget _buildJarvisWelcomeCard(BuildContext context) {
-    return JarvisCard(
-      padding: 24.0,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 72.0,
-            height: 72.0,
+            width: 80.0,
+            height: 80.0,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: AppColors.jarvisButtonGradient,
+              gradient: const RadialGradient(
+                colors: [
+                  Color(0xFFE8ECEF), // specular highlight
+                  Color(0xFF6366FF), // primary theme color
+                  Color(0xFF2C2F8A), // shadow shade
+                ],
+                center: Alignment(-0.35, -0.35),
+                radius: 0.75,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  blurRadius: 20.0,
+                  color: const Color(0xFF6366FF).withOpacity(0.5),
+                  blurRadius: 24.0,
+                  spreadRadius: 2.0,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 8.0,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: const Center(
+            child: Center(
               child: Icon(
                 Icons.blur_on_rounded,
-                size: 36.0,
-                color: Colors.white,
+                size: 40.0,
+                color: Colors.white.withOpacity(0.95),
+                shadows: [
+                  Shadow(
+                    color: Colors.black.withOpacity(0.35),
+                    offset: const Offset(1, 2),
+                    blurRadius: 4.0,
+                  ),
+                ],
               ),
             ),
           ).animate(onPlay: (controller) => controller.repeat(reverse: true))
            .scale(end: const Offset(1.08, 1.08), duration: 1.5.seconds, curve: Curves.easeInOut),
-          const SizedBox(height: 20.0),
+          const SizedBox(height: 24.0),
           Text(
             "Hi, I'm Jarvis",
             style: AppTypography.h2(color: AppColors.textPrimary).copyWith(
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 10.0),
+          const SizedBox(height: 12.0),
           Text(
             "Your Personal Life Operating System is ready to assist you. I can help you organize priorities, build habits, track budgets, and write memories.",
             textAlign: TextAlign.center,
@@ -69,27 +94,12 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 20.0),
-          Text(
-            "Tap the glowing orb at the bottom of the screen to talk to me, or ask me something like:",
-            textAlign: TextAlign.center,
-            style: AppTypography.caption(color: AppColors.textTertiary),
-          ),
-          const SizedBox(height: 12.0),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
-              borderRadius: BorderRadius.circular(12.0),
-              border: Border.all(color: Colors.white.withOpacity(0.06)),
-            ),
-            child: Text(
-              '"Spent ₹250 on coffee and track morning walk habit"',
-              style: AppTypography.caption(color: AppColors.primary).copyWith(
-                fontStyle: FontStyle.italic,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+          const SizedBox(height: 24.0),
+          JarvisButton(
+            text: "Talk to Jarvis",
+            onPressed: () {
+              ref.read(commandBarVisibleProvider.notifier).state = true;
+            },
           ),
         ],
       ),
@@ -121,72 +131,85 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
       body: SafeArea(
         top: false,
         bottom: false,
-        child: RefreshIndicator(
-          onRefresh: () async {
-            // Invalidate/reload today's providers
-            ref.invalidate(todayMoodProvider);
-            ref.invalidate(todayTasksProvider);
-            ref.invalidate(todaySpentProvider);
-            ref.invalidate(taskProvider);
-            ref.invalidate(habitProvider);
-          },
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(
-              left: 20.0,
-              right: 20.0,
-              bottom: 120.0, // generous bottom padding to clear floating nav bar and FAB
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 1. Greeting Header
-                const GreetingHeader()
-                    .animate()
-                    .fade(duration: 400.ms)
-                    .slideY(begin: -0.05, end: 0.0),
-                
-                const SizedBox(height: 12.0),
+        child: isNewUser
+            ? Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 60.0), // top padding for header
+                    const GreetingHeader()
+                        .animate()
+                        .fade(duration: 400.ms)
+                        .slideY(begin: -0.05, end: 0.0),
+                    Expanded(
+                      child: Center(
+                        child: _buildJarvisWelcomeCard(context)
+                            .animate()
+                            .fade(delay: 100.ms, duration: 400.ms)
+                            .slideY(begin: 0.05, end: 0.0),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : RefreshIndicator(
+                onRefresh: () async {
+                  // Invalidate/reload today's providers
+                  ref.invalidate(todayMoodProvider);
+                  ref.invalidate(todayTasksProvider);
+                  ref.invalidate(todaySpentProvider);
+                  ref.invalidate(taskProvider);
+                  ref.invalidate(habitProvider);
+                },
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(
+                    left: 20.0,
+                    right: 20.0,
+                    bottom: 120.0, // generous bottom padding to clear floating nav bar and FAB
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 1. Greeting Header
+                      const GreetingHeader()
+                          .animate()
+                          .fade(duration: 400.ms)
+                          .slideY(begin: -0.05, end: 0.0),
+                      
+                      const SizedBox(height: 12.0),
 
-                if (isNewUser) ...[
-                  const SizedBox(height: 8.0),
-                  _buildJarvisWelcomeCard(context)
-                      .animate()
-                      .fade(delay: 100.ms, duration: 400.ms)
-                      .slideY(begin: 0.05, end: 0.0),
-                ] else ...[
-                  // 3. Today's Progress Card (now cardless stats)
-                  const DailySummaryCard()
-                      .animate()
-                      .fade(delay: 100.ms, duration: 400.ms),
-                  
-                  const SizedBox(height: 24.0),
+                      // 3. Today's Progress Card (now cardless stats)
+                      const DailySummaryCard()
+                          .animate()
+                          .fade(delay: 100.ms, duration: 400.ms),
+                      
+                      const SizedBox(height: 24.0),
 
-                  // 4. Next Activity (Timeline - renamed to To Do)
-                  const TimelineSection()
-                      .animate()
-                      .fade(delay: 150.ms, duration: 400.ms)
-                      .slideY(begin: 0.05, end: 0.0),
-                  
-                  const SizedBox(height: 24.0),
+                      // 4. Next Activity (Timeline - renamed to To Do)
+                      const TimelineSection()
+                          .animate()
+                          .fade(delay: 150.ms, duration: 400.ms)
+                          .slideY(begin: 0.05, end: 0.0),
+                      
+                      const SizedBox(height: 24.0),
 
-                  // 5. Jarvis Suggestions
-                  const JarvisSuggestionsCard()
-                      .animate()
-                      .fade(delay: 200.ms, duration: 400.ms)
-                      .slideY(begin: 0.05, end: 0.0),
-                  
-                  const SizedBox(height: 24.0),
+                      // 5. Jarvis Suggestions
+                      const JarvisSuggestionsCard()
+                          .animate()
+                          .fade(delay: 200.ms, duration: 400.ms)
+                          .slideY(begin: 0.05, end: 0.0),
+                      
+                      const SizedBox(height: 24.0),
 
-                  // 6. Daily Quote (now cardless blockquote)
-                  const DailyQuoteCard()
-                      .animate()
-                      .fade(delay: 250.ms, duration: 400.ms),
-                ],
-              ],
-            ),
-          ),
-        ),
+                      // 6. Daily Quote (now cardless blockquote)
+                      const DailyQuoteCard()
+                          .animate()
+                          .fade(delay: 250.ms, duration: 400.ms),
+                    ],
+                  ),
+                ),
+              ),
       ),
     );
   }

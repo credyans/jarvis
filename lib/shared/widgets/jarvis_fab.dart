@@ -61,7 +61,7 @@ class _JarvisFabState extends State<JarvisFab> with SingleTickerProviderStateMix
             ],
           ),
           child: const Icon(
-            Icons.auto_awesome_rounded,
+            Icons.blur_on_rounded,
             color: Colors.white,
             size: 26.0,
           ),

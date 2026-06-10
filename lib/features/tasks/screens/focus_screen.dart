@@ -394,6 +394,11 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
       });
     }
 
+    final tasks = tasksAsync.value ?? [];
+    final habits = habitsAsync.value ?? [];
+    final isTabEmpty = (activeTab == 0 && tasks.isEmpty) || (activeTab == 1 && habits.isEmpty);
+    final scrollPhysics = isTabEmpty ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics();
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
@@ -407,7 +412,7 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
             ref.invalidate(todayTasksProvider);
           },
           child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: scrollPhysics,
             slivers: [
               // 1. Unified Header (Title + Segmented Tabs)
               SliverPadding(
@@ -535,18 +540,14 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                       if (filtered.isEmpty) {
                         return SliverFillRemaining(
                           hasScrollBody: false,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const SizedBox(height: 48.0),
-                              EmptyState(
-                                emoji: '🎯',
-                                title: 'All priorities cleared!',
-                                subtitle: 'No active priorities found. Tap below to map your next focus.',
-                                actionLabel: 'Create priority',
-                                onActionPressed: () => _showAddTaskSheet(context),
-                              ),
-                            ],
+                          child: Center(
+                            child: EmptyState(
+                              emoji: '🎯',
+                              title: 'All priorities cleared!',
+                              subtitle: 'No active priorities found. Tap below to map your next focus.',
+                              actionLabel: 'Create priority',
+                              onActionPressed: () => _showAddTaskSheet(context),
+                            ),
                           ),
                         );
                       }
@@ -648,18 +649,14 @@ class _FocusScreenState extends ConsumerState<FocusScreen> {
                       if (habits.isEmpty) {
                         return SliverFillRemaining(
                           hasScrollBody: false,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const SizedBox(height: 48.0),
-                              EmptyState(
-                                emoji: '🔄',
-                                title: 'No habits logged yet',
-                                subtitle: 'Take small steps. Build atomic habits by setting daily checkpoints.',
-                                actionLabel: 'Create habit',
-                                onActionPressed: () => _showAddHabitSheet(context),
-                              ),
-                            ],
+                          child: Center(
+                            child: EmptyState(
+                              emoji: '🔄',
+                              title: 'No habits logged yet',
+                              subtitle: 'Take small steps. Build atomic habits by setting daily checkpoints.',
+                              actionLabel: 'Create habit',
+                              onActionPressed: () => _showAddHabitSheet(context),
+                            ),
                           ),
                         );
                       }
