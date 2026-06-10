@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -271,121 +270,127 @@ class NotificationService {
 
   void startLocalReminderChecker() {
     _localReminderTimer?.cancel();
-    _localReminderTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+    _localReminderTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       final now = DateTime.now();
       final dateKey = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
       final timeKey = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
 
-      // Get root navigator context
-      final context = rootNavigatorKey.currentContext;
-      if (context == null) return;
-
       try {
         // 1. Check local Hive tasks due today
-        final tasksBox = Hive.isBoxOpen('tasks') ? Hive.box('tasks') : await Hive.openBox('tasks');
-        final tasks = tasksBox.values.toList();
-        for (final t in tasks) {
-          final taskMap = Map<String, dynamic>.from(t);
-          final dueDate = taskMap['dueDate'] as DateTime?;
-          final dueTime = taskMap['dueTime'] as String?;
-          final completed = taskMap['completed'] as bool? ?? false;
-          final title = taskMap['title'] as String? ?? '';
-          final id = taskMap['id'] as String? ?? '';
+        if (Hive.isBoxOpen('tasks')) {
+          final tasksBox = Hive.box('tasks');
+          final tasks = tasksBox.values.toList();
+          for (final t in tasks) {
+            final taskMap = Map<String, dynamic>.from(t);
+            final dueDate = taskMap['dueDate'] as DateTime?;
+            final dueTime = taskMap['dueTime'] as String?;
+            final completed = taskMap['completed'] as bool? ?? false;
+            final title = taskMap['title'] as String? ?? '';
+            final id = taskMap['id'] as String? ?? '';
 
-          if (dueDate != null && dueTime != null && !completed) {
-            final taskDateKey = "${dueDate.year}-${dueDate.month.toString().padLeft(2, '0')}-${dueDate.day.toString().padLeft(2, '0')}";
-            if (taskDateKey == dateKey && dueTime == timeKey) {
-              final notificationId = "task_${id}_$timeKey";
-              if (!_firedNotificationIds.contains(notificationId)) {
-                _firedNotificationIds.add(notificationId);
-                
-                // Show in-app Toast
-                ToastNotification.show(
-                  context,
-                  "⏰ Task Reminder: \"$title\" is due now!",
-                );
+            if (dueDate != null && dueTime != null && !completed) {
+              final taskDateKey = "${dueDate.year}-${dueDate.month.toString().padLeft(2, '0')}-${dueDate.day.toString().padLeft(2, '0')}";
+              if (taskDateKey == dateKey && dueTime == timeKey) {
+                final notificationId = "task_${id}_$timeKey";
+                if (!_firedNotificationIds.contains(notificationId)) {
+                  _firedNotificationIds.add(notificationId);
+                  
+                  // Show in-app Toast
+                  final ctx = rootNavigatorKey.currentContext;
+                  if (ctx != null) {
+                    ToastNotification.show(
+                      ctx,
+                      "⏰ Task Reminder: \"$title\" is due now!",
+                    );
+                  }
 
-                // Also trigger a system local notification (sound and alert)
-                const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-                  'jarvis_tasks_immediate',
-                  'Task Reminders',
-                  importance: Importance.max,
-                  priority: Priority.high,
-                );
-                await _notificationsPlugin.show(
-                  id.hashCode,
-                  'Task Due Now! ⏰',
-                  'Your priority "$title" is scheduled for this time.',
-                  const NotificationDetails(
-                    android: androidDetails,
-                    iOS: DarwinNotificationDetails(
-                      presentAlert: true,
-                      presentBadge: true,
-                      presentSound: true,
+                  // Also trigger a system local notification (sound and alert)
+                  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+                    'jarvis_tasks_immediate',
+                    'Task Reminders',
+                    importance: Importance.max,
+                    priority: Priority.high,
+                  );
+                  _notificationsPlugin.show(
+                    id.hashCode,
+                    'Task Due Now! ⏰',
+                    'Your priority "$title" is scheduled for this time.',
+                    const NotificationDetails(
+                      android: androidDetails,
+                      iOS: DarwinNotificationDetails(
+                        presentAlert: true,
+                        presentBadge: true,
+                        presentSound: true,
+                      ),
                     ),
-                  ),
-                );
+                  );
+                }
               }
             }
           }
         }
 
         // 2. Check local Hive habits due today
-        final habitsBox = Hive.isBoxOpen('habits') ? Hive.box('habits') : await Hive.openBox('habits');
-        final habits = habitsBox.values.toList();
-        for (final h in habits) {
-          final habitMap = Map<String, dynamic>.from(h);
-          final name = habitMap['name'] as String? ?? '';
-          final icon = habitMap['icon'] as String? ?? '🔄';
-          final reminderTime = habitMap['reminderTime'] as String?;
-          final frequency = habitMap['frequency'] as String? ?? 'daily';
-          final completions = List<String>.from(habitMap['completions'] ?? []);
-          final id = habitMap['id'] as String? ?? '';
+        if (Hive.isBoxOpen('habits')) {
+          final habitsBox = Hive.box('habits');
+          final habits = habitsBox.values.toList();
+          for (final h in habits) {
+            final habitMap = Map<String, dynamic>.from(h);
+            final name = habitMap['name'] as String? ?? '';
+            final icon = habitMap['icon'] as String? ?? '🔄';
+            final reminderTime = habitMap['reminderTime'] as String?;
+            final frequency = habitMap['frequency'] as String? ?? 'daily';
+            final completions = List<String>.from(habitMap['completions'] ?? []);
+            final id = habitMap['id'] as String? ?? '';
 
-          // Check if completed today
-          final isDone = completions.contains(dateKey);
-          if (reminderTime != null && !isDone) {
-            // Check frequency
-            bool isDueToday = false;
-            if (frequency == 'daily') {
-              isDueToday = true;
-            } else if (frequency == 'weekdays') {
-              isDueToday = now.weekday >= 1 && now.weekday <= 5;
-            } else {
-              isDueToday = true;
-            }
+            // Check if completed today
+            final isDone = completions.contains(dateKey);
+            if (reminderTime != null && !isDone) {
+              // Check frequency
+              bool isDueToday = false;
+              if (frequency == 'daily') {
+                isDueToday = true;
+              } else if (frequency == 'weekdays') {
+                isDueToday = now.weekday >= 1 && now.weekday <= 5;
+              } else {
+                isDueToday = true;
+              }
 
-            if (isDueToday && reminderTime == timeKey) {
-              final notificationId = "habit_${id}_$timeKey";
-              if (!_firedNotificationIds.contains(notificationId)) {
-                _firedNotificationIds.add(notificationId);
-                
-                // Show in-app Toast
-                ToastNotification.show(
-                  context,
-                  "⏰ Habit Reminder: Time for \"$name\" $icon!",
-                );
+              if (isDueToday && reminderTime == timeKey) {
+                final notificationId = "habit_${id}_$timeKey";
+                if (!_firedNotificationIds.contains(notificationId)) {
+                  _firedNotificationIds.add(notificationId);
+                  
+                  // Show in-app Toast
+                  final ctx = rootNavigatorKey.currentContext;
+                  if (ctx != null) {
+                    ToastNotification.show(
+                      ctx,
+                      "⏰ Habit Reminder: Time for \"$name\" $icon!",
+                    );
+                  }
 
-                // Also trigger system local notification
-                const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-                  'jarvis_habits_immediate',
-                  'Habit Reminders',
-                  importance: Importance.max,
-                  priority: Priority.high,
-                );
-                await _notificationsPlugin.show(
-                  id.hashCode,
-                  'Habit Alert! 🔄',
-                  'Time to complete your habit: "$name" $icon',
-                  const NotificationDetails(
-                    android: androidDetails,
-                    iOS: DarwinNotificationDetails(
-                      presentAlert: true,
-                      presentBadge: true,
-                      presentSound: true,
+                  // Also trigger system local notification
+                  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+                    'jarvis_habits_immediate',
+                    'Habit Reminders',
+                    importance: Importance.max,
+                    priority: Priority.high,
+                  );
+                  _notificationsPlugin.show(
+                    id.hashCode,
+                    'Habit Alert! 🔄',
+                    'Time to complete your habit: "$name" $icon',
+                    const NotificationDetails(
+                      android: androidDetails,
+                      iOS: DarwinNotificationDetails(
+                        presentAlert: true,
+                        presentBadge: true,
+                        presentSound: true,
+                      ),
                     ),
-                  ),
-                );
+                  );
+                }
               }
             }
           }

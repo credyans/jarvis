@@ -11,8 +11,6 @@ import 'package:jarvis/features/tasks/data/repositories/supabase_task_repository
 import 'package:jarvis/features/tasks/domain/repositories/task_repository.dart';
 
 // Money imports for Unified Tasks
-import 'package:jarvis/features/money/data/models/bill_reminder_model.dart';
-import 'package:jarvis/features/money/data/models/debt_model.dart';
 import 'package:jarvis/features/money/data/models/transaction_model.dart';
 import 'package:jarvis/data/providers/money_provider.dart';
 

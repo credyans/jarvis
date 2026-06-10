@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:jarvis/core/theme/app_colors.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
-import 'package:jarvis/core/theme/app_spacing.dart';
 import 'package:jarvis/core/services/notification_service.dart';
 import 'package:jarvis/data/providers/user_provider.dart';
 import 'package:jarvis/shared/widgets/gradient_background.dart';

@@ -11,7 +11,6 @@ import 'package:jarvis/features/money/data/models/transaction_model.dart';
 import 'package:jarvis/features/money/data/models/financial_goal_model.dart';
 import 'package:jarvis/features/money/data/models/debt_model.dart';
 import 'package:jarvis/features/money/data/models/debt_payment_model.dart';
-import 'package:jarvis/features/money/data/models/savings_plan_model.dart';
 import 'package:jarvis/data/providers/money_provider.dart';
 import 'package:jarvis/data/providers/task_provider.dart';
 import 'package:jarvis/features/tasks/data/models/task_model.dart';
@@ -67,14 +66,7 @@ class _MoneyScreenState extends ConsumerState<MoneyScreen> {
     );
   }
 
-  void _showAddBillReminderSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const AddBillReminderSheet(),
-    );
-  }
+
 
   void _showAddSavingsPlanSheet(BuildContext context) {
     showModalBottomSheet(
@@ -1199,38 +1191,7 @@ class _GoalsList extends StatelessWidget {
     );
   }
 
-  void _showAddSavingsDialog(BuildContext context, FinancialGoalModel goal) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add Savings to ${goal.name}', style: AppTypography.h2(color: AppColors.textPrimary)),
-        content: JarvisInput(
-          hintText: '₹ Amount to add',
-          controller: controller,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            onPressed: () {
-              final amt = double.tryParse(controller.text.trim());
-              if (amt != null && amt > 0) {
-                onAddAmount(goal.id, amt);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Add', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
+
 }
 
 class _DebtCard extends ConsumerWidget {
@@ -1641,7 +1602,7 @@ class _GoalDetailsSheetState extends ConsumerState<_GoalDetailsSheet> {
       type: 'expense', // savings are recorded as outflow from liquidity
       amount: amount,
       category: 'Savings Goal (${widget.goal.name})',
-      description: 'Goal: ${widget.goal.name}${noteText.isEmpty ? "" : " — " + noteText}',
+      description: 'Goal: ${widget.goal.name}${noteText.isEmpty ? "" : " — $noteText"}',
       emoji: widget.goal.icon,
       date: DateTime.now(),
       createdAt: DateTime.now(),

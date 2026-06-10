@@ -1,8 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:jarvis/core/theme/app_colors.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
 import 'package:jarvis/core/utils/intent_detector.dart';
@@ -46,6 +51,12 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
 
   Timer? _typingTimer;
 
+  // Real voice dependencies
+  late stt.SpeechToText _speech;
+  bool _speechInitialized = false;
+  late FlutterTts _flutterTts;
+  bool _isSpeaking = false;
+
   final List<String> _simulatedCommands = [
     'Spent ₹350 on lunch and track morning walk habit',
     'Lent 500 to Saroo and do weekly presentation prep',
@@ -58,6 +69,112 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
   void initState() {
     super.initState();
     _focusNode.requestFocus();
+    _initVoiceChat();
+  }
+
+  Future<void> _initVoiceChat() async {
+    _speech = stt.SpeechToText();
+    _flutterTts = FlutterTts();
+
+    try {
+      _speechInitialized = await _speech.initialize(
+        onStatus: (status) {
+          debugPrint('Speech status: $status');
+          if (status == 'done' || status == 'notListening') {
+            if (_isListening) {
+              setState(() {
+                _isListening = false;
+              });
+              if (_listeningText.isNotEmpty) {
+                _processCommand(_listeningText);
+              }
+            }
+          }
+        },
+        onError: (errorNotification) {
+          debugPrint('Speech error: $errorNotification');
+          setState(() {
+            _isListening = false;
+          });
+        },
+      );
+    } catch (e) {
+      debugPrint('Error initializing speech_to_text: $e');
+    }
+
+    try {
+      await _flutterTts.setLanguage("en-US");
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setPitch(1.0);
+      
+      _flutterTts.setStartHandler(() {
+        setState(() => _isSpeaking = true);
+      });
+      _flutterTts.setCompletionHandler(() {
+        setState(() => _isSpeaking = false);
+      });
+      _flutterTts.setErrorHandler((msg) {
+        setState(() => _isSpeaking = false);
+      });
+    } catch (e) {
+      debugPrint('Error initializing flutter_tts: $e');
+    }
+  }
+
+  Future<void> _speakText(String text) async {
+    await _flutterTts.stop();
+    final cleanText = text.replaceAll(RegExp(r'[\u2600-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]'), '');
+    if (cleanText.trim().isEmpty) return;
+    await _flutterTts.speak(cleanText);
+  }
+
+  Future<void> _startVoiceChat() async {
+    await _flutterTts.stop();
+    
+    bool hasPermission = true;
+    if (!kIsWeb) {
+      final status = await Permission.microphone.status;
+      if (!status.isGranted) {
+        final result = await Permission.microphone.request();
+        hasPermission = result.isGranted;
+      }
+    }
+
+    if (!hasPermission || !_speechInitialized) {
+      debugPrint('Microphone not available. Falling back to simulator.');
+      if (mounted) {
+        ToastNotification.show(
+          context,
+          'Microphone not available. Running simulated voice assistant.',
+          type: 'info',
+        );
+      }
+      _startSimulatedVoice();
+      return;
+    }
+
+    setState(() {
+      _isListening = true;
+      _listeningText = '';
+      _currentStep = 0;
+      _draftResults = [];
+    });
+
+    try {
+      await _speech.listen(
+        onResult: (result) {
+          setState(() {
+            _listeningText = result.recognizedWords;
+          });
+        },
+        listenFor: const Duration(seconds: 20),
+        pauseFor: const Duration(seconds: 4),
+      );
+    } catch (e) {
+      debugPrint('Error starting speech listen: $e');
+      _startSimulatedVoice();
+    }
   }
 
   @override
@@ -65,6 +182,10 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
     _typingTimer?.cancel();
     _inputController.dispose();
     _focusNode.dispose();
+    try {
+      _speech.stop();
+      _flutterTts.stop();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -130,14 +251,17 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         if (isIrrelevant) {
           _currentStep = 3; // Conversational / Irrelevant advice state
           _conversationalResponse = _generateConversationalAdvice(text);
+          _speakText(_conversationalResponse!);
         } else {
           _draftResults = IntentDetector.detectMultiple(text);
           if (_draftResults.isNotEmpty) {
             _currentStep = 1; // Start draft card slides
             _currentDraftIndex = 0;
+            _speakText("I've parsed your command. Let's review: ${_draftResults[0].originalText}");
           } else {
             _currentStep = 3;
             _conversationalResponse = 'I could not parse any action from that command. Try stating a direct task, habit, transaction, or debt.';
+            _speakText(_conversationalResponse!);
           }
         }
       });
@@ -170,6 +294,7 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
             _isProcessing = false;
             _currentDraftIndex++;
           });
+          _speakText("Next item: ${_draftResults[_currentDraftIndex].originalText}");
         }
       });
     } else {
@@ -183,6 +308,7 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
             _isProcessing = false;
             _currentStep = 2; // Summary screen
           });
+          _speakText("Please review and confirm all parsed items.");
         }
       });
     }
@@ -300,6 +426,8 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         _inputController.clear();
       });
 
+      _speakText("Created $count items successfully!");
+
       if (mounted) {
         ToastNotification.show(context, 'Successfully created $count items!');
       }
@@ -318,6 +446,7 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
       setState(() {
         _isProcessing = false;
       });
+      _speakText("Failed to save items.");
       if (mounted) {
         ToastNotification.show(context, 'Failed to save items: $e', type: 'error');
       }
@@ -496,59 +625,15 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         ).animate().fade(delay: 200.ms, duration: 400.ms),
         const SizedBox(height: 56.0),
 
-        // Simulated Mic Circle Button
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 130.0,
-              height: 130.0,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    AppColors.primary.withOpacity(0.2),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            )
-            .animate(onPlay: (controller) => controller.repeat(reverse: true))
-            .scale(begin: const Offset(0.9, 0.9), end: const Offset(1.3, 1.3), duration: 2.seconds),
-            
-            GestureDetector(
-              onTap: _startSimulatedVoice,
-              child: Container(
-                width: 74.0,
-                height: 74.0,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFFA297), Color(0xFFB68FEB)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primary.withOpacity(0.35),
-                      blurRadius: 24.0,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.mic_rounded,
-                  color: Colors.white,
-                  size: 32.0,
-                ),
-              ),
-            ),
-          ],
+        // Animated Jarvis AI Sprite Bubble
+        JarvisAiSpriteBubble(
+          state: _isSpeaking ? JarvisBubbleState.speaking : JarvisBubbleState.idle,
+          onTap: _startVoiceChat,
         ).animate().scale(delay: 300.ms, duration: 450.ms, curve: Curves.easeOutBack),
         
-        const SizedBox(height: 20.0),
+        const SizedBox(height: 24.0),
         Text(
-          'Tap microphone to speak',
+          _isSpeaking ? 'Jarvis is speaking...' : 'Tap to talk to Jarvis',
           style: AppTypography.caption(color: Colors.white.withOpacity(0.4)),
         ),
 
@@ -584,42 +669,18 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
       key: const ValueKey('listening'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Concentric animated pulsing waves
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            for (int i = 0; i < 3; i++)
-              Container(
-                width: 90.0 + (i * 40.0),
-                height: 90.0 + (i * 40.0),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFB68FEB).withOpacity(0.08 - (i * 0.025)),
-                  border: Border.all(color: const Color(0xFFB68FEB).withOpacity(0.05)),
-                ),
-              )
-              .animate(onPlay: (controller) => controller.repeat())
-              .scale(begin: const Offset(0.8, 0.8), end: const Offset(1.45, 1.45), duration: 1.6.seconds, delay: (i * 350).ms)
-              .fade(begin: 1.0, end: 0.0, duration: 1.6.seconds, delay: (i * 350).ms),
-              
-            Container(
-              width: 80.0,
-              height: 80.0,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Color(0xFF6BE5E5), Color(0xFFB68FEB)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: const Icon(
-                Icons.mic_none_rounded,
-                color: Colors.white,
-                size: 36.0,
-              ),
-            ),
-          ],
+        // Concentric animated pulsing waves / active listening bubble
+        JarvisAiSpriteBubble(
+          state: JarvisBubbleState.listening,
+          onTap: () {
+            _speech.stop();
+            setState(() {
+              _isListening = false;
+            });
+            if (_listeningText.isNotEmpty) {
+              _processCommand(_listeningText);
+            }
+          },
         ),
         const SizedBox(height: 48.0),
         Text(
@@ -1120,13 +1181,17 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
           child: Row(
             children: [
-              // Voice Icon Simulation
+              // Voice Icon (Gemini Spark)
               GestureDetector(
-                onTap: _startSimulatedVoice,
-                child: Icon(
-                  Icons.mic_none_rounded,
-                  color: Colors.white.withOpacity(0.5),
-                  size: 24.0,
+                onTap: _startVoiceChat,
+                child: SizedBox(
+                  width: 22.0,
+                  height: 22.0,
+                  child: CustomPaint(
+                    painter: GeminiSparkPainter(
+                      color: Colors.white.withOpacity(0.6),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 12.0),
@@ -1170,4 +1235,178 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
       ),
     );
   }
+}
+
+enum JarvisBubbleState { idle, listening, speaking }
+
+class JarvisAiSpriteBubble extends StatelessWidget {
+  final JarvisBubbleState state;
+  final VoidCallback? onTap;
+
+  const JarvisAiSpriteBubble({
+    super.key,
+    required this.state,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isListening = state == JarvisBubbleState.listening;
+    final isSpeaking = state == JarvisBubbleState.speaking;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 1. Concentric pulsing/rotating outer halos
+          if (isListening || isSpeaking) ...[
+            for (int i = 0; i < 3; i++)
+              Container(
+                width: 120.0 + (i * 35.0),
+                height: 120.0 + (i * 35.0),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      (isListening ? const Color(0xFF6BE5E5) : const Color(0xFFFFA297)).withOpacity(0.06 - (i * 0.018)),
+                      Colors.transparent,
+                    ],
+                  ),
+                  border: Border.all(
+                    color: (isListening ? const Color(0xFF6BE5E5) : const Color(0xFFB68FEB))
+                        .withOpacity(0.04 - (i * 0.012)),
+                    width: 1.0,
+                  ),
+                ),
+              )
+              .animate(onPlay: (controller) => controller.repeat())
+              .scale(
+                begin: const Offset(0.85, 0.85),
+                end: const Offset(1.35, 1.35),
+                duration: isSpeaking ? 1.2.seconds : 1.8.seconds,
+                delay: (i * 400).ms,
+                curve: Curves.easeOut,
+              )
+              .fade(
+                begin: 1.0,
+                end: 0.0,
+                duration: isSpeaking ? 1.2.seconds : 1.8.seconds,
+                delay: (i * 400).ms,
+                curve: Curves.easeOut,
+              ),
+          ] else ...[
+            // Idle pulses
+            Container(
+              width: 150.0,
+              height: 150.0,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFFFFA297).withOpacity(0.12),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            )
+            .animate(onPlay: (controller) => controller.repeat(reverse: true))
+            .scale(begin: const Offset(0.9, 0.9), end: const Offset(1.2, 1.2), duration: 2.5.seconds, curve: Curves.easeInOut),
+          ],
+
+          // 2. Middle liquid morphing aura bubble
+          Container(
+            width: 96.0,
+            height: 96.0,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (isListening ? const Color(0xFF6BE5E5) : const Color(0xFFB68FEB)).withOpacity(0.35),
+                  blurRadius: 28.0,
+                  spreadRadius: 2.0,
+                ),
+              ],
+              gradient: LinearGradient(
+                colors: isListening
+                    ? [const Color(0xFF6BE5E5), const Color(0xFFB68FEB), const Color(0xFF6366FF)]
+                    : isSpeaking
+                        ? [const Color(0xFFFFA297), const Color(0xFFB68FEB), const Color(0xFF6BE5E5)]
+                        : [const Color(0xFFFFA297), const Color(0xFFB68FEB)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          )
+          .animate(onPlay: (controller) => controller.repeat(reverse: true))
+          .scale(
+            begin: const Offset(0.96, 0.96),
+            end: const Offset(1.06, 1.06),
+            duration: isSpeaking ? 0.7.seconds : isListening ? 1.2.seconds : 2.seconds,
+            curve: Curves.easeInOut,
+          ),
+
+          // 3. Inner solid gradient core containing rotating Gemini Spark
+          Container(
+            width: 76.0,
+            height: 76.0,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF0F172A).withOpacity(0.9),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.12),
+                width: 1.5,
+              ),
+            ),
+            child: Center(
+              child: SizedBox(
+                width: 38.0,
+                height: 38.0,
+                child: CustomPaint(
+                  painter: GeminiSparkPainter(
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          )
+          .animate(onPlay: (controller) => controller.repeat())
+          .rotate(
+            begin: 0.0,
+            end: 2.0 * math.pi,
+            duration: isSpeaking ? 3.seconds : isListening ? 6.seconds : 14.seconds,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GeminiSparkPainter extends CustomPainter {
+  final Color color;
+  GeminiSparkPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    final radius = size.width / 2;
+
+    final path = Path();
+    path.moveTo(centerX, centerY - radius); // Top
+    path.quadraticBezierTo(centerX, centerY, centerX + radius, centerY); // to Right
+    path.quadraticBezierTo(centerX, centerY, centerX, centerY + radius); // to Bottom
+    path.quadraticBezierTo(centerX, centerY, centerX - radius, centerY); // to Left
+    path.quadraticBezierTo(centerX, centerY, centerX, centerY - radius); // back to Top
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

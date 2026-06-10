@@ -4,7 +4,6 @@ import 'package:jarvis/core/theme/app_colors.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
 import 'package:jarvis/core/utils/currency_formatter.dart';
 import 'package:jarvis/core/utils/id_generator.dart';
-import 'package:jarvis/core/constants/emoji_map.dart';
 import 'package:jarvis/features/money/data/models/bill_reminder_model.dart';
 import 'package:jarvis/features/money/data/models/transaction_model.dart';
 import 'package:jarvis/data/providers/money_provider.dart';
