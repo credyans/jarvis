@@ -268,6 +268,61 @@ class NotificationService {
     await _notificationsPlugin.cancelAll();
   }
 
+  Future<void> scheduleBirthdayNotification(
+    String personName,
+    String eventType,
+    DateTime eventDate,
+  ) async {
+    final offsets = [
+      {'days': 7, 'body': "$personName's $eventType is in 7 days! 🎁"},
+      {'days': 1, 'body': "$personName's $eventType is tomorrow! 🎁"},
+      {'days': 0, 'body': "Today is $personName's $eventType! Wish them! 🎂"},
+    ];
+
+    for (final alert in offsets) {
+      final scheduledDate = eventDate.subtract(Duration(days: alert['days'] as int));
+      final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
+      tz.TZDateTime scheduledTZ = tz.TZDateTime(
+        tz.local,
+        scheduledDate.year,
+        scheduledDate.month,
+        scheduledDate.day,
+        9,
+        0,
+      );
+
+      if (scheduledTZ.isAfter(now)) {
+        final notificationId = "${personName}_${eventType}_${alert['days']}".hashCode;
+        
+        const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+          'jarvis_relationship_reminders',
+          'Relationship Reminders',
+          channelDescription: 'Alerts for birthdays and anniversaries',
+          importance: Importance.high,
+          priority: Priority.high,
+        );
+
+        await _notificationsPlugin.zonedSchedule(
+          notificationId,
+          "$personName's ${eventType[0].toUpperCase()}${eventType.substring(1)} 🎈",
+          alert['body'] as String,
+          scheduledTZ,
+          const NotificationDetails(
+            android: androidDetails,
+            iOS: DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
+            ),
+          ),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    }
+  }
+
   void startLocalReminderChecker() {
     _localReminderTimer?.cancel();
     _localReminderTimer = Timer.periodic(const Duration(seconds: 5), (timer) {

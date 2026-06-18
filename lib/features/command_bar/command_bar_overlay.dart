@@ -8,6 +8,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:jarvis/core/theme/app_colors.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
 import 'package:jarvis/core/utils/intent_detector.dart';
@@ -19,12 +21,18 @@ import 'package:jarvis/features/money/data/models/transaction_model.dart';
 import 'package:jarvis/features/money/data/models/debt_model.dart';
 import 'package:jarvis/features/mood/data/models/mood_entry_model.dart';
 import 'package:jarvis/features/habits/data/models/habit_model.dart';
+import 'package:jarvis/features/money/data/models/financial_goal_model.dart';
+import 'package:jarvis/data/models/person_model.dart';
+import 'package:jarvis/data/models/long_term_memory_model.dart';
 import 'package:jarvis/data/providers/task_provider.dart';
 import 'package:jarvis/data/providers/money_provider.dart';
 import 'package:jarvis/data/providers/mood_provider.dart';
 import 'package:jarvis/data/providers/habit_provider.dart';
 import 'package:jarvis/data/providers/navigation_provider.dart';
 import 'package:jarvis/data/providers/user_provider.dart';
+import 'package:jarvis/data/providers/person_provider.dart';
+import 'package:jarvis/data/providers/long_term_memory_provider.dart';
+import 'package:jarvis/core/services/notification_service.dart';
 import 'package:jarvis/shared/widgets/jarvis_button.dart';
 import 'package:jarvis/shared/widgets/toast_notification.dart';
 
@@ -42,12 +50,14 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
   // State Management
   bool _isListening = false;
   bool _isProcessing = false;
-  int _currentStep = 0; // 0: welcome/input, 1: draft cards sequence, 2: final summary, 3: conversational advice
+  int _currentStep = 0; // 0: welcome/input, 1: draft cards sequence, 2: final summary, 3: conversational advice, 4: transcript review
   String _listeningText = '';
   List<IntentResult> _draftResults = [];
   int _currentDraftIndex = 0;
   String? _conversationalResponse;
   int _createdCount = 0;
+  String _selectedLocale = 'en_IN';
+  late TextEditingController _transcriptEditController;
 
   Timer? _typingTimer;
 
@@ -56,6 +66,13 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
   bool _speechInitialized = false;
   late FlutterTts _flutterTts;
   bool _isSpeaking = false;
+
+  // LiveKit WebRTC state variables
+  lk.Room? _lkRoom;
+  lk.EventsListener<lk.RoomEvent>? _lkListener;
+  bool _isLiveKitConnected = false;
+  bool _isAgentSpeaking = false;
+  String _livekitStatusText = '';
 
   final List<String> _simulatedCommands = [
     'Spent ₹350 on lunch and track morning walk habit',
@@ -68,6 +85,7 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
   @override
   void initState() {
     super.initState();
+    _transcriptEditController = TextEditingController();
     _focusNode.requestFocus();
     _initVoiceChat();
   }
@@ -86,7 +104,10 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
                 _isListening = false;
               });
               if (_listeningText.isNotEmpty) {
-                _processCommand(_listeningText);
+                _transcriptEditController.text = _listeningText;
+                setState(() {
+                  _currentStep = 4;
+                });
               }
             }
           }
@@ -170,6 +191,7 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         },
         listenFor: const Duration(seconds: 20),
         pauseFor: const Duration(seconds: 4),
+        localeId: _selectedLocale,
       );
     } catch (e) {
       debugPrint('Error starting speech listen: $e');
@@ -177,19 +199,171 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
     }
   }
 
+  String _generateLiveKitToken({
+    required String apiKey,
+    required String apiSecret,
+    required String roomName,
+    required String participantName,
+  }) {
+    final jwt = JWT(
+      {
+        'video': {
+          'roomJoin': true,
+          'room': roomName,
+          'canPublish': true,
+          'canSubscribe': true,
+          'canPublishData': true,
+        },
+        'metadata': participantName,
+      },
+      issuer: apiKey,
+      subject: participantName,
+    );
+
+    final token = jwt.sign(
+      SecretKey(apiSecret),
+      expiresIn: const Duration(hours: 2),
+    );
+    
+    return token;
+  }
+
+  Future<void> _connectToLiveKit() async {
+    setState(() {
+      _isListening = true;
+      _isLiveKitConnected = false;
+      _isAgentSpeaking = false;
+      _livekitStatusText = 'Connecting to Jarvis Live...';
+      _listeningText = '';
+    });
+
+    try {
+      final token = _generateLiveKitToken(
+        apiKey: 'APIers9jc8sXZdo',
+        apiSecret: 'dl6ksSE8F1v6VNUNO94yGheGlFadYHhJ6yk53LpcxmS',
+        roomName: 'jarvis_voice_room',
+        participantName: 'User_${math.Random().nextInt(1000)}',
+      );
+
+      _lkRoom = lk.Room(
+        roomOptions: const lk.RoomOptions(
+          adaptiveStream: true,
+          dynacast: true,
+        ),
+      );
+      _lkListener = _lkRoom!.createListener();
+      
+      _lkListener!.on<lk.ActiveSpeakersChangedEvent>((event) {
+        bool remoteSpeaking = false;
+        for (final speaker in event.speakers) {
+          if (speaker is lk.RemoteParticipant) {
+            remoteSpeaking = true;
+            break;
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _isAgentSpeaking = remoteSpeaking;
+            _livekitStatusText = remoteSpeaking ? 'Jarvis is speaking...' : 'Listening to you...';
+          });
+        }
+      });
+
+      _lkListener!.on<lk.DataReceivedEvent>((event) {
+        final text = String.fromCharCodes(event.data);
+        debugPrint('LiveKit Data: $text');
+        if (mounted) {
+          setState(() {
+            _listeningText = text;
+          });
+        }
+      });
+
+      _lkListener!.on<lk.RoomDisconnectedEvent>((event) {
+        debugPrint('Room disconnected: ${event.reason}');
+        if (mounted) {
+          _disconnectLiveKit();
+        }
+      });
+
+      // Connect to the LiveKit room
+      await _lkRoom!.connect(
+        'wss://jarvis-vr2hvf0d.livekit.cloud',
+        token,
+      );
+
+      // Request mic permission
+      bool hasPermission = true;
+      if (!kIsWeb) {
+        final status = await Permission.microphone.status;
+        if (!status.isGranted) {
+          final result = await Permission.microphone.request();
+          hasPermission = result.isGranted;
+        }
+      }
+
+      if (hasPermission) {
+        await _lkRoom!.localParticipant?.setMicrophoneEnabled(true);
+        if (mounted) {
+          setState(() {
+            _isLiveKitConnected = true;
+            _livekitStatusText = 'Connected. Speak now!';
+          });
+        }
+      } else {
+        throw Exception('Microphone permission denied.');
+      }
+
+    } catch (e) {
+      debugPrint('LiveKit connection failed: $e');
+      if (mounted) {
+        setState(() {
+          _isLiveKitConnected = false;
+          _livekitStatusText = 'LiveKit failed. Falling back to local AI.';
+        });
+        ToastNotification.show(
+          context,
+          'LiveKit error: ${e.toString().split('\n').first}. Running offline assistant.',
+          type: 'error',
+        );
+      }
+      _disconnectLiveKit();
+      // Fallback
+      _startVoiceChat();
+    }
+  }
+
+  void _disconnectLiveKit() {
+    try {
+      _lkListener?.dispose();
+      _lkListener = null;
+      _lkRoom?.disconnect();
+      _lkRoom = null;
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _isLiveKitConnected = false;
+        _isAgentSpeaking = false;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _typingTimer?.cancel();
     _inputController.dispose();
+    _transcriptEditController.dispose();
     _focusNode.dispose();
     try {
       _speech.stop();
       _flutterTts.stop();
     } catch (_) {}
+    _disconnectLiveKit();
     super.dispose();
   }
 
   void _closeCommandBar() {
+    _disconnectLiveKit();
     ref.read(commandBarVisibleProvider.notifier).state = false;
   }
 
@@ -219,9 +393,9 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
           if (mounted) {
             setState(() {
               _isListening = false;
-              _inputController.text = randomCommand;
+              _transcriptEditController.text = randomCommand;
+              _currentStep = 4;
             });
-            _processCommand(randomCommand);
           }
         });
       }
@@ -417,6 +591,154 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
             await ref.read(transactionProvider.notifier).addTransaction(tx);
             count++;
           }
+        } else if (type == IntentType.goal) {
+          final amt = data['amount'] as double? ?? 10000.0;
+          final goal = FinancialGoalModel(
+            id: IdGenerator.generate(),
+            name: originalText,
+            icon: EmojiMap.getEmoji(originalText),
+            targetAmount: amt,
+            currentAmount: 0.0,
+            deadline: DateTime.now().add(const Duration(days: 90)),
+            createdAt: DateTime.now(),
+          );
+          await ref.read(goalProvider.notifier).addGoal(goal);
+          count++;
+        } else if (type == IntentType.journal) {
+          final task = TaskModel(
+            id: IdGenerator.generate(),
+            title: originalText,
+            description: 'Journal entry logged via Jarvis AI command bar.',
+            dueDate: DateTime.now(),
+            dueTime: data['time'] as String? ?? '09:00',
+            priority: 0,
+            completed: true,
+            emoji: '📝',
+            tagId: 'Journal',
+            createdAt: DateTime.now(),
+          );
+          await ref.read(taskProvider.notifier).addTask(task);
+          ref.invalidate(todayTasksProvider);
+          count++;
+        } else if (type == IntentType.memory) {
+          // 1. Save as Task for daily timeline vault log
+          final task = TaskModel(
+            id: IdGenerator.generate(),
+            title: originalText,
+            description: 'Memory log logged via Jarvis AI command bar.',
+            dueDate: DateTime.now(),
+            dueTime: data['time'] as String? ?? '09:00',
+            priority: 0,
+            completed: true,
+            emoji: '🧠',
+            tagId: 'Memory',
+            createdAt: DateTime.now(),
+          );
+          await ref.read(taskProvider.notifier).addTask(task);
+          ref.invalidate(todayTasksProvider);
+
+          // 2. Save as LongTermMemoryModel record
+          final memoryType = data['memoryType'] as String? ?? 'general';
+          final memory = LongTermMemoryModel(
+            id: IdGenerator.generate(),
+            title: data['cleanTitle'] as String? ?? originalText,
+            body: originalText,
+            type: memoryType,
+            date: DateTime.now(),
+            createdAt: DateTime.now(),
+          );
+          await ref.read(longTermMemoryProvider.notifier).saveMemory(memory);
+          count++;
+        } else if (type == IntentType.people) {
+          final name = data['name'] as String? ?? 'Friend';
+          final eventType = data['eventType'] as String? ?? 'birthday';
+          final dateText = data['dateText'] as String? ?? 'June 18';
+          
+          int month = 6;
+          int day = 18;
+          try {
+            final lower = dateText.toLowerCase();
+            final monthsList = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+            for (int i = 0; i < monthsList.length; i++) {
+              if (lower.contains(monthsList[i])) {
+                month = i + 1;
+                break;
+              }
+            }
+            final dayMatch = RegExp(r'\d+').firstMatch(lower);
+            if (dayMatch != null) {
+              day = int.tryParse(dayMatch.group(0)!) ?? 18;
+            }
+          } catch (_) {}
+
+          final now = DateTime.now();
+          DateTime eventDate = DateTime(now.year, month, day);
+          if (eventDate.isBefore(DateTime(now.year, now.month, now.day))) {
+            eventDate = DateTime(now.year + 1, month, day);
+          }
+
+          final person = PersonModel(
+            id: IdGenerator.generate(),
+            name: name,
+            birthday: eventType == 'birthday' ? eventDate : null,
+            anniversary: eventType == 'anniversary' ? eventDate : null,
+            relationshipNotes: 'Automatically created via Jarvis voice/command assistant.',
+            tags: const ['Friend'],
+            createdAt: DateTime.now(),
+          );
+          await ref.read(personProvider.notifier).savePerson(person);
+
+          final mainEvent = TaskModel(
+            id: IdGenerator.generate(),
+            title: "$name's ${eventType[0].toUpperCase()}${eventType.substring(1)}: $dateText",
+            description: "Annual recurring event for $name.",
+            dueDate: eventDate,
+            dueTime: '09:00',
+            priority: 3,
+            completed: false,
+            emoji: eventType == 'birthday' ? '🎁' : '💍',
+            tagId: 'Relationship',
+            createdAt: DateTime.now(),
+          );
+          await ref.read(taskProvider.notifier).addTask(mainEvent);
+
+          final alertOffsets = [
+            {'offset': const Duration(days: 7), 'label': '7-Day Alert', 'emoji': '🔔'},
+            {'offset': const Duration(days: 1), 'label': '1-Day Alert', 'emoji': '🔔'},
+            {'offset': Duration.zero, 'label': 'Morning Alert', 'emoji': '⏰'},
+          ];
+
+          for (final alert in alertOffsets) {
+            final alertDate = eventDate.subtract(alert['offset'] as Duration);
+            if (alertDate.isAfter(DateTime.now())) {
+              final alertTask = TaskModel(
+                id: IdGenerator.generate(),
+                title: "$name's ${eventType[0].toUpperCase()}${eventType.substring(1)} (${alert['label']})",
+                description: "Reminder alert for $name's upcoming birthday/anniversary.",
+                dueDate: alertDate,
+                dueTime: '09:00',
+                priority: 2,
+                completed: false,
+                emoji: alert['emoji'] as String,
+                tagId: 'Relationship',
+                createdAt: DateTime.now(),
+              );
+              await ref.read(taskProvider.notifier).addTask(alertTask);
+            }
+          }
+
+          try {
+            await NotificationService().scheduleBirthdayNotification(
+              name,
+              eventType,
+              eventDate,
+            );
+          } catch (e) {
+            debugPrint("Notification schedule failed: $e");
+          }
+
+          ref.invalidate(todayTasksProvider);
+          count++;
         }
       }
 
@@ -595,6 +917,8 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         return _buildFinalSummaryView();
       case 3:
         return _buildConversationalAdviceView();
+      case 4:
+        return _buildTranscriptReviewView();
       case 0:
       default:
         return _buildWelcomeView(userName);
@@ -627,15 +951,21 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
 
         // Animated Jarvis AI Sprite Bubble
         JarvisAiSpriteBubble(
-          state: _isSpeaking ? JarvisBubbleState.speaking : JarvisBubbleState.idle,
-          onTap: _startVoiceChat,
+          state: _isLiveKitConnected
+              ? (_isAgentSpeaking ? JarvisBubbleState.speaking : JarvisBubbleState.listening)
+              : (_isSpeaking ? JarvisBubbleState.speaking : JarvisBubbleState.idle),
+          onTap: _connectToLiveKit,
         ).animate().scale(delay: 300.ms, duration: 450.ms, curve: Curves.easeOutBack),
         
         const SizedBox(height: 24.0),
         Text(
-          _isSpeaking ? 'Jarvis is speaking...' : 'Tap to talk to Jarvis',
+          _isLiveKitConnected
+              ? (_isAgentSpeaking ? 'Jarvis is speaking...' : 'Listening to you...')
+              : (_isSpeaking ? 'Jarvis is speaking...' : 'Tap to talk to Jarvis'),
           style: AppTypography.caption(color: Colors.white.withOpacity(0.4)),
         ),
+        const SizedBox(height: 16.0),
+        _buildLocaleSelector(),
 
         if (_createdCount > 0) ...[
           const SizedBox(height: 48.0),
@@ -663,6 +993,48 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
     );
   }
 
+  Widget _buildLocaleSelector() {
+    return Container(
+      padding: const EdgeInsets.all(4.0),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16.0),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildLocaleTab('en_IN', 'English 🇮🇳'),
+          _buildLocaleTab('ta_IN', 'Tamil 🇮🇳'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocaleTab(String locale, String label) {
+    final isSelected = _selectedLocale == locale;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedLocale = locale;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12.0),
+        ),
+        child: Text(
+          label,
+          style: AppTypography.caption(
+            color: isSelected ? Colors.white : Colors.white.withOpacity(0.6),
+          ).copyWith(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
+        ),
+      ),
+    );
+  }
+
   // ── voice state: transcribing simulation ──
   Widget _buildVoiceListeningView() {
     return Column(
@@ -671,21 +1043,42 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
       children: [
         // Concentric animated pulsing waves / active listening bubble
         JarvisAiSpriteBubble(
-          state: JarvisBubbleState.listening,
+          state: _isLiveKitConnected
+              ? (_isAgentSpeaking ? JarvisBubbleState.speaking : JarvisBubbleState.listening)
+              : JarvisBubbleState.listening,
           onTap: () {
-            _speech.stop();
-            setState(() {
-              _isListening = false;
-            });
-            if (_listeningText.isNotEmpty) {
-              _processCommand(_listeningText);
+            if (_isLiveKitConnected) {
+              final finalSpeech = _listeningText;
+              _disconnectLiveKit();
+              setState(() {
+                _isListening = false;
+              });
+              if (finalSpeech.isNotEmpty) {
+                _transcriptEditController.text = finalSpeech;
+                setState(() {
+                  _currentStep = 4;
+                });
+              }
+            } else {
+              _speech.stop();
+              setState(() {
+                _isListening = false;
+              });
+              if (_listeningText.isNotEmpty) {
+                _transcriptEditController.text = _listeningText;
+                setState(() {
+                  _currentStep = 4;
+                });
+              }
             }
           },
         ),
         const SizedBox(height: 48.0),
         Text(
-          'Listening...',
-          style: AppTypography.h3(color: const Color(0xFF6BE5E5)).copyWith(fontWeight: FontWeight.bold),
+          _isLiveKitConnected ? _livekitStatusText : 'Listening...',
+          style: AppTypography.h3(
+            color: _isAgentSpeaking ? const Color(0xFFFFA297) : const Color(0xFF6BE5E5)
+          ).copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 32.0),
         
@@ -813,6 +1206,26 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
         typeLabel = 'EMI Collection';
         emoji = '🪙';
         themeColor = const Color(0xFFFFA297);
+        break;
+      case IntentType.goal:
+        typeLabel = 'Financial Goal';
+        emoji = '🎯';
+        themeColor = AppColors.success;
+        break;
+      case IntentType.journal:
+        typeLabel = 'Journal Entry';
+        emoji = '📝';
+        themeColor = AppColors.secondary;
+        break;
+      case IntentType.memory:
+        typeLabel = 'Memory Record';
+        emoji = '🧠';
+        themeColor = const Color(0xFFFFA297);
+        break;
+      case IntentType.people:
+        typeLabel = 'Relationship Event';
+        emoji = '🎁';
+        themeColor = const Color(0xFF6BE5E5);
         break;
       default:
         typeLabel = 'Productivity Item';
@@ -1056,6 +1469,14 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
                   emoji = '🎭'; color = const Color(0xFFFFA297); typeLabel = 'Mood';
                 } else if (result.type == IntentType.debtAdd) {
                   emoji = '🤝'; color = const Color(0xFF6BE5E5); typeLabel = 'Debt';
+                } else if (result.type == IntentType.goal) {
+                  emoji = '🎯'; color = AppColors.success; typeLabel = 'Goal';
+                } else if (result.type == IntentType.journal) {
+                  emoji = '📝'; color = AppColors.secondary; typeLabel = 'Journal';
+                } else if (result.type == IntentType.memory) {
+                  emoji = '🧠'; color = const Color(0xFFFFA297); typeLabel = 'Memory';
+                } else if (result.type == IntentType.people) {
+                  emoji = '🎁'; color = const Color(0xFF6BE5E5); typeLabel = 'Relationship';
                 }
 
                 return Container(
@@ -1163,6 +1584,81 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
     );
   }
 
+  // ── step 4: Transcript Review View ──
+  Widget _buildTranscriptReviewView() {
+    return Container(
+      key: const ValueKey('review'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(24.0),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(28.0),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Text('📝', style: TextStyle(fontSize: 24.0)),
+              const SizedBox(width: 10.0),
+              Text(
+                'Review Transcript',
+                style: AppTypography.bodyMedium(color: Colors.white).copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16.0),
+          Text(
+            'Edit what you said or tap analyze to proceed:',
+            style: AppTypography.caption(color: Colors.white.withOpacity(0.5)),
+          ),
+          const SizedBox(height: 12.0),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(20.0),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: TextField(
+              controller: _transcriptEditController,
+              maxLines: 4,
+              style: AppTypography.body(color: Colors.white),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Edit transcript...',
+                hintStyle: TextStyle(color: Colors.white30),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24.0),
+          Row(
+            children: [
+              Expanded(
+                child: JarvisButton(
+                  text: 'Cancel',
+                  isOutline: true,
+                  onPressed: _resetInput,
+                ),
+              ),
+              const SizedBox(width: 12.0),
+              Expanded(
+                child: JarvisButton(
+                  text: 'Analyze with Jarvis',
+                  onPressed: () {
+                    _processCommand(_transcriptEditController.text);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Bottom Glassmorphic Input Bar ──
   Widget _buildBottomInputBar() {
     return ClipRRect(
@@ -1183,13 +1679,42 @@ class _CommandBarOverlayState extends ConsumerState<CommandBarOverlay> {
             children: [
               // Voice Icon (Gemini Spark)
               GestureDetector(
-                onTap: _startVoiceChat,
+                onTap: _connectToLiveKit,
                 child: SizedBox(
                   width: 22.0,
                   height: 22.0,
                   child: CustomPaint(
                     painter: GeminiSparkPainter(
                       color: Colors.white.withOpacity(0.6),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8.0),
+              // Tiny locale selector button next to mic
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedLocale = _selectedLocale == 'en_IN' ? 'ta_IN' : 'en_IN';
+                  });
+                  ToastNotification.show(
+                    context,
+                    'Language switched to ${_selectedLocale == 'en_IN' ? 'English (India)' : 'Tamil'}',
+                    type: 'info',
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(6.0),
+                  ),
+                  child: Text(
+                    _selectedLocale == 'en_IN' ? 'EN' : 'TA',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10.0,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),

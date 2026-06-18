@@ -44,3 +44,6 @@ app.*.map.json
 
 # Local MCP settings (contains API keys)
 mcp_settings.json
+.env.local
+.env
+

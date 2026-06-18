@@ -10,6 +10,7 @@ import 'package:jarvis/features/tasks/screens/focus_screen.dart';
 import 'package:jarvis/features/money/screens/money_screen.dart';
 import 'package:jarvis/features/memory/screens/memory_screen.dart';
 import 'package:jarvis/features/command_bar/command_bar_overlay.dart';
+import 'package:jarvis/features/today/widgets/daily_briefing_view.dart';
 
 class AppScaffold extends ConsumerWidget {
   const AppScaffold({super.key});
@@ -62,6 +63,7 @@ class AppScaffold extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeTab = ref.watch(currentTabProvider);
     final isCommandBarVisible = ref.watch(commandBarVisibleProvider);
+    final briefingCompleted = ref.watch(briefingCompletedProvider);
     final size = MediaQuery.of(context).size;
     final isWidescreen = size.width > 800;
 
@@ -72,8 +74,10 @@ class AppScaffold extends ConsumerWidget {
       MemoryScreen(),
     ];
 
+    Widget mainContent;
+
     if (isWidescreen) {
-      return Scaffold(
+      mainContent = Scaffold(
         resizeToAvoidBottomInset: false,
         body: Stack(
           children: [
@@ -179,42 +183,54 @@ class AppScaffold extends ConsumerWidget {
           ],
         ),
       );
+    } else {
+      // Mobile Layout
+      mainContent = Scaffold(
+        resizeToAvoidBottomInset: false,
+        body: Stack(
+          children: [
+            // Background + Content Screen
+            GradientBackground(
+              child: IndexedStack(
+                index: activeTab,
+                children: screens,
+              ),
+            ),
+
+            // Bottom Navigation Bar
+            Positioned(
+              left: 0.0,
+              right: 0.0,
+              bottom: 0.0,
+              child: JarvisBottomNavBar(
+                currentIndex: activeTab,
+                onTap: (index) {
+                  ref.read(currentTabProvider.notifier).state = index;
+                },
+                onJarvisTap: () {
+                  ref.read(commandBarVisibleProvider.notifier).state = true;
+                },
+              ),
+            ),
+
+            // Raycast Command Bar Overlay
+            if (isCommandBarVisible)
+              const CommandBarOverlay(),
+          ],
+        ),
+      );
     }
 
-    // Mobile Layout
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          // Background + Content Screen
-          GradientBackground(
-            child: IndexedStack(
-              index: activeTab,
-              children: screens,
-            ),
+    return Stack(
+      children: [
+        mainContent,
+        if (!briefingCompleted)
+          DailyBriefingView(
+            onDismiss: () {
+              ref.read(briefingCompletedProvider.notifier).state = true;
+            },
           ),
-
-          // Bottom Navigation Bar
-          Positioned(
-            left: 0.0,
-            right: 0.0,
-            bottom: 0.0,
-            child: JarvisBottomNavBar(
-              currentIndex: activeTab,
-              onTap: (index) {
-                ref.read(currentTabProvider.notifier).state = index;
-              },
-              onJarvisTap: () {
-                ref.read(commandBarVisibleProvider.notifier).state = true;
-              },
-            ),
-          ),
-
-          // Raycast Command Bar Overlay
-          if (isCommandBarVisible)
-            const CommandBarOverlay(),
-        ],
-      ),
+      ],
     );
   }
 }

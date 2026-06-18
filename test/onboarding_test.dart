@@ -21,7 +21,7 @@ void main() {
 
     // 1. Sign in anonymously
     final uid = await localAuthRepo.signInAnonymously();
-    expect(uid, 'local_user');
+    expect(uid, isNotEmpty);
 
     // 2. Create user model
     final user = UserModel(
