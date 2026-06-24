@@ -9,7 +9,6 @@ import 'package:jarvis/features/today/screens/today_screen.dart';
 import 'package:jarvis/features/tasks/screens/focus_screen.dart';
 import 'package:jarvis/features/money/screens/money_screen.dart';
 import 'package:jarvis/features/memory/screens/memory_screen.dart';
-import 'package:jarvis/features/command_bar/command_bar_overlay.dart';
 import 'package:jarvis/features/today/widgets/daily_briefing_view.dart';
 
 class AppScaffold extends ConsumerWidget {
@@ -63,7 +62,6 @@ class AppScaffold extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeTab = ref.watch(currentTabProvider);
     final isCommandBarVisible = ref.watch(commandBarVisibleProvider);
-    final briefingCompleted = ref.watch(briefingCompletedProvider);
     final size = MediaQuery.of(context).size;
     final isWidescreen = size.width > 800;
 
@@ -177,9 +175,13 @@ class AppScaffold extends ConsumerWidget {
                 ),
               ],
             ),
-            // Command Bar Overlay
+            // Living Voice Assistant Overlay (replacing old CommandBarOverlay)
             if (isCommandBarVisible)
-              const CommandBarOverlay(),
+              DailyBriefingView(
+                onDismiss: () {
+                  ref.read(commandBarVisibleProvider.notifier).state = false;
+                },
+              ),
           ],
         ),
       );
@@ -213,9 +215,13 @@ class AppScaffold extends ConsumerWidget {
               ),
             ),
 
-            // Raycast Command Bar Overlay
+            // Living Voice Assistant Overlay (replacing old CommandBarOverlay)
             if (isCommandBarVisible)
-              const CommandBarOverlay(),
+              DailyBriefingView(
+                onDismiss: () {
+                  ref.read(commandBarVisibleProvider.notifier).state = false;
+                },
+              ),
           ],
         ),
       );
@@ -224,12 +230,6 @@ class AppScaffold extends ConsumerWidget {
     return Stack(
       children: [
         mainContent,
-        if (!briefingCompleted)
-          DailyBriefingView(
-            onDismiss: () {
-              ref.read(briefingCompletedProvider.notifier).state = true;
-            },
-          ),
       ],
     );
   }

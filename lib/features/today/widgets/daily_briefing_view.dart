@@ -9,9 +9,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:jarvis/core/theme/app_colors.dart';
-import 'package:jarvis/core/theme/app_spacing.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
-import 'package:jarvis/core/utils/date_helpers.dart';
 import 'package:jarvis/core/utils/id_generator.dart';
 import 'package:jarvis/core/utils/intent_detector.dart';
 import 'package:jarvis/core/utils/currency_formatter.dart';
@@ -33,10 +31,7 @@ import 'package:jarvis/data/providers/habit_provider.dart';
 import 'package:jarvis/data/providers/user_provider.dart';
 import 'package:jarvis/data/providers/person_provider.dart';
 import 'package:jarvis/data/providers/long_term_memory_provider.dart';
-import 'package:jarvis/core/services/notification_service.dart';
-
 import 'package:jarvis/shared/widgets/jarvis_button.dart';
-import 'package:jarvis/shared/widgets/toast_notification.dart';
 
 final briefingCompletedProvider = StateProvider<bool>((ref) => false);
 
@@ -56,12 +51,12 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
   String _transcript = '';
   String _replyText = '';
   double _dragOffset = 0.0;
+  double _soundLevel = 0.0; // Voice wave amplitude
 
   // Voice dependencies
   late stt.SpeechToText _speech;
   bool _speechInitialized = false;
   late FlutterTts _flutterTts;
-  bool _isSpeaking = false;
 
   // Animation controllers
   late AnimationController _waveController;
@@ -127,19 +122,16 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
       _flutterTts.setStartHandler(() {
         setState(() {
           _state = AssistantState.speaking;
-          _isSpeaking = true;
         });
       });
       _flutterTts.setCompletionHandler(() {
         setState(() {
           _state = AssistantState.idle;
-          _isSpeaking = false;
         });
       });
       _flutterTts.setErrorHandler((msg) {
         setState(() {
           _state = AssistantState.idle;
-          _isSpeaking = false;
         });
       });
     } catch (e) {
@@ -190,6 +182,11 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
         onResult: (result) {
           setState(() {
             _transcript = result.recognizedWords;
+          });
+        },
+        onSoundLevelChange: (level) {
+          setState(() {
+            _soundLevel = level;
           });
         },
         listenFor: const Duration(seconds: 10),
@@ -249,6 +246,7 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
     }
 
     setState(() {
+      _soundLevel = 0.0;
       _state = AssistantState.thinking;
     });
 
@@ -451,6 +449,7 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
       }
 
       ref.invalidate(todayTasksProvider);
+      debugPrint('Processed $count intents successfully');
       
       final firstType = intents[0].type;
       final firstText = intents[0].originalText;
@@ -532,6 +531,23 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
       amplitude = 0.6 + 0.4 * math.sin(_waveController.value * 4 * math.pi);
     }
 
+    // Dynamic 3D Moving AI Particle Sphere amplitude calculations
+    double particleAmplitude = 0.0;
+    if (_state == AssistantState.listening) {
+      if (_soundLevel > 0.0) {
+        particleAmplitude = 0.25 + (_soundLevel.clamp(0.0, 10.0) / 10.0) * 0.75;
+      } else {
+        particleAmplitude = 0.3 + 0.2 * math.sin(_waveController.value * 4 * math.pi);
+      }
+    } else if (_state == AssistantState.speaking) {
+      particleAmplitude = 0.5 + 0.5 * math.sin(_waveController.value * 6 * math.pi);
+    } else if (_state == AssistantState.thinking) {
+      particleAmplitude = 0.45 + 0.25 * math.sin(_waveController.value * 8 * math.pi);
+    } else {
+      // Idle breathing state
+      particleAmplitude = 0.1 + 0.08 * math.sin(_orbPulseController.value * math.pi);
+    }
+
     return GestureDetector(
       onVerticalDragUpdate: (details) {
         setState(() {
@@ -597,30 +613,21 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Greeting & Heading
+                        // Greeting & Heading (Large center text)
                         Column(
                           children: [
-                            const SizedBox(height: 16.0),
+                            const SizedBox(height: 32.0),
                             Text(
-                              DateHelpers.greeting(),
-                              style: AppTypography.display(color: Colors.white70).copyWith(
-                                fontSize: 24.0,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ).animate().fade().slideY(begin: -0.1, end: 0),
-                            const SizedBox(height: 4.0),
-                            Text(
-                              'Hello $name',
+                              "Hey $name,\nI'm here to remind you.",
                               style: AppTypography.display(color: Colors.white).copyWith(
-                                fontSize: 36.0,
+                                fontSize: 34.0,
                                 fontWeight: FontWeight.w900,
+                                height: 1.35,
+                                letterSpacing: -0.5,
                               ),
-                            ).animate().fade(delay: 150.ms).slideY(begin: -0.1, end: 0),
-                            const SizedBox(height: 8.0),
-                            Text(
-                              'What would you like to do today?',
-                              style: AppTypography.body(color: AppColors.textSecondary),
-                            ).animate().fade(delay: 300.ms),
+                              textAlign: TextAlign.center,
+                            ).animate().fade().slideY(begin: -0.1, end: 0),
+                            const SizedBox(height: 16.0),
                           ],
                         ),
 
@@ -636,23 +643,27 @@ class _DailyBriefingViewState extends ConsumerState<DailyBriefingView> with Tick
                                 // Concentric Ripples (Listening State)
                                 _buildRipples(),
 
-                                // Orbiting Particle Ring (Thinking State)
-                                if (_state == AssistantState.thinking)
-                                  AnimatedBuilder(
-                                    animation: _orbRotateController,
-                                    builder: (context, child) {
-                                      return SizedBox(
-                                        width: 200.0,
-                                        height: 200.0,
-                                        child: CustomPaint(
-                                          painter: OrbParticlePainter(
-                                            angle: _orbRotateController.value * 2 * math.pi,
-                                            color: AppColors.secondary,
-                                          ),
+                                // Dynamic 3D Moving AI Particle Sphere (Reacts to Voice/Vocal sound waves)
+                                AnimatedBuilder(
+                                  animation: _orbRotateController,
+                                  builder: (context, child) {
+                                    return SizedBox(
+                                      width: 240.0,
+                                      height: 240.0,
+                                      child: CustomPaint(
+                                        painter: OrbParticlePainter(
+                                          angle: _orbRotateController.value * 2 * math.pi,
+                                          color: _state == AssistantState.listening
+                                              ? AppColors.secondary
+                                              : _state == AssistantState.thinking
+                                                  ? AppColors.warningLight
+                                                  : AppColors.primaryLight,
+                                          amplitude: particleAmplitude,
                                         ),
-                                      );
-                                    },
-                                  ),
+                                      ),
+                                    );
+                                  },
+                                ),
 
                                 // Main 3D Glowing Orb Sphere
                                 AnimatedBuilder(
@@ -954,31 +965,79 @@ class _OrbRipplesPainter extends CustomPainter {
 class OrbParticlePainter extends CustomPainter {
   final double angle;
   final Color color;
+  final double amplitude;
 
-  OrbParticlePainter({required this.angle, required this.color});
+  OrbParticlePainter({
+    required this.angle,
+    required this.color,
+    required this.amplitude,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.width / 2) + 20.0;
+    final baseRadius = (size.width / 2) - 10.0;
 
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    final paint = Paint()..style = PaintingStyle.fill;
 
-    for (int i = 0; i < 12; i++) {
-      final particleAngle = angle + (i * 2 * math.pi / 12);
-      final offset = Offset(
-        center.dx + math.cos(particleAngle) * radius,
-        center.dy + math.sin(particleAngle) * radius,
-      );
+    // We will draw 3 orbits (rings) tilted in 3D space to form a particle sphere.
+    // Each orbit has 8 particles, so 24 particles in total.
+    
+    // Orbit 1: Horizontal orbit with a slight tilt
+    _drawOrbit(canvas, center, baseRadius, angle, 0.0, 0.2, paint);
+    
+    // Orbit 2: Vertical-ish orbit tilted left
+    _drawOrbit(canvas, center, baseRadius, angle + (2 * math.pi / 3), 1.0, 0.8, paint);
+    
+    // Orbit 3: Vertical-ish orbit tilted right
+    _drawOrbit(canvas, center, baseRadius, angle + (4 * math.pi / 3), -1.0, 0.8, paint);
+  }
+
+  void _drawOrbit(
+    Canvas canvas,
+    Offset center,
+    double baseRadius,
+    double orbitAngle,
+    double tiltX,
+    double tiltY,
+    Paint paint,
+  ) {
+    const int particleCount = 8;
+    for (int i = 0; i < particleCount; i++) {
+      final double pAngle = orbitAngle + (i * 2 * math.pi / particleCount);
       
-      final pSize = 3.0 + 2.0 * math.sin(particleAngle * 2);
+      // Calculate 3D sphere coordinate projections
+      // Jitter creates the active vocal wave sound reaction
+      final jitter = math.sin(pAngle * 4 + angle * 8) * amplitude * 18.0;
+      final radius = baseRadius + amplitude * 32.0 + jitter;
+
+      final double x3d = math.cos(pAngle);
+      final double y3d = math.sin(pAngle);
+      
+      // Rotate coordinates in space to simulate 3D projection
+      final double xProj = x3d;
+      final double yProj = y3d * tiltY + x3d * tiltX * 0.3;
+      final double zProj = y3d * (1.0 - tiltY.abs()) + x3d * (1.0 - tiltX.abs()) * 0.5; // Depth factor
+
+      final offset = Offset(
+        center.dx + xProj * radius,
+        center.dy + yProj * radius,
+      );
+
+      // Particle size scales with depth and sound amplitude
+      final double pSize = (3.5 + amplitude * 4.5) * (1.0 + zProj * 0.4);
+      
+      // Fade particles at the back to enhance 3D depth perception
+      final double opacity = (0.2 + 0.8 * (zProj + 1.0) / 2.0).clamp(0.1, 1.0);
+      paint.color = color.withOpacity(opacity);
+
       canvas.drawCircle(offset, pSize, paint);
     }
   }
 
   @override
   bool shouldRepaint(covariant OrbParticlePainter oldDelegate) =>
-      oldDelegate.angle != angle || oldDelegate.color != color;
+      oldDelegate.angle != angle ||
+      oldDelegate.color != color ||
+      oldDelegate.amplitude != amplitude;
 }

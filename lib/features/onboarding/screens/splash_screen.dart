@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:jarvis/core/theme/app_colors.dart';
 import 'package:jarvis/core/theme/app_typography.dart';
 import 'package:jarvis/data/providers/user_provider.dart';
+import 'package:jarvis/data/seed_data.dart';
 import 'package:jarvis/shared/widgets/gradient_background.dart';
-import 'package:jarvis/core/services/notification_service.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -29,17 +30,52 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (!mounted) return;
     
     final userState = ref.read(userProvider);
-    final user = userState.value;
-    
-    if (!mounted) return;
+    var user = userState.value;
     
     if (user == null) {
-      context.go('/welcome');
-    } else if (!user.onboardingComplete) {
-      context.go('/onboarding');
-    } else {
-      context.go('/');
+      try {
+        final authBox = await Hive.openBox('auth_mock_db');
+        final email = 'demo@jarvis.local';
+        final uid = 'demo_user_santhosh';
+        
+        final usersMap = Map<String, dynamic>.from(authBox.get('users', defaultValue: {}));
+        usersMap[email] = {
+          'id': uid,
+          'name': 'Santhosh',
+          'password': 'Password123!',
+          'joinDate': DateTime.now().toIso8601String(),
+          'currency': '₹',
+          'onboardingComplete': true,
+          'focusAreas': ['tasks', 'habits', 'money', 'journaling'],
+          'wakeTime': '07:00'
+        };
+        await authBox.put('users', usersMap);
+        await authBox.put('current_user_email', email);
+        await authBox.put('is_verified', true);
+        
+        final userBox = await Hive.openBox('user_profile');
+        await userBox.put('profile', {
+          'id': uid,
+          'name': 'Santhosh',
+          'joinDate': DateTime.now().toIso8601String(),
+          'currency': '₹',
+          'onboardingComplete': true,
+          'focusAreas': ['tasks', 'habits', 'money', 'journaling'],
+          'wakeTime': '07:00'
+        });
+
+        // Seed default dummy data in Hive box
+        await SeedData.seed(uid, force: true);
+        
+        // Load the session into Riverpod state
+        await ref.read(userProvider.notifier).loadUser();
+      } catch (e) {
+        debugPrint('Error seeding demo user: $e');
+      }
     }
+    
+    if (!mounted) return;
+    context.go('/');
   }
 
   @override
